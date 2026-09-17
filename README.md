@@ -2,7 +2,7 @@
 
 An AI support agent built on the [Customer Support on Twitter](https://www.kaggle.com/datasets/thoughtvector/customer-support-on-twitter) dataset, scoped to the **AmazonHelp** brand. Given an incoming customer tweet, it classifies intent, drafts a reply grounded in how AmazonHelp has historically responded to similar messages, and decides whether to auto-handle or escalate to a human, with a stated reason.
 
-Full pipeline write-up (numbers, findings, caveats): [`pipeline_summary.txt`](pipeline_summary.txt).
+Full pipeline write-up (numbers, findings, caveats): [`pipeline_summary.txt`](pipeline_summary.txt). System design, component-by-component mechanics, and the future roadmap: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Reproduce this
 
