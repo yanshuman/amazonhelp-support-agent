@@ -1,0 +1,13 @@
+id,name,definition
+1,order_status,"Asking where an order is or for an ETA, with no complaint yet that anything is wrong."
+2,delivery_problem,"The delivery itself failed: late, missing, misdelivered, or a rude/careless courier; 'delivered' but not actually received."
+3,refund_or_return,"Wants money back or wants to send an item back, including A-to-z Guarantee claims."
+4,cancellation_or_change,"Cancel or modify an order, or report that AmazonHelp/the seller cancelled one."
+5,billing_or_payment,"Wrong, duplicate, or unexplained charge; payment declined; gift card can't be used; unauthorized charge."
+6,product_defect,"The physical item or device itself is broken, wrong, or not as described (not a delivery failure)."
+7,account_access,"Login, password, suspended/locked account, or phishing/fraud emails."
+8,app_or_site_technical,"A site or app feature, or a checkout option, is broken or missing."
+9,digital_content,"Kindle, Prime Video, Alexa/Echo software, or other digital-purchase content issues (not hardware malfunctions)."
+10,subscription_membership,"Prime membership signup, benefits, renewal, or cancellation."
+11,general_feedback_or_praise,Venting or praise with no specific actionable request attached.
+12,other,"Doesn't fit any of the above - policy/legal questions, contests, unrelated social posts."

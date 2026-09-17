@@ -1,0 +1,8 @@
+numpy
+pandas
+langdetect
+openai
+python-dotenv
+scipy
+ipykernel
+jupyter

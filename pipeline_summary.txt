@@ -1,0 +1,186 @@
+HIVER SDE INTERN ASSIGNMENT — AMAZONHELP SUPPORT AGENT
+Pipeline summary — what was built, in order
+=======================================================
+
+BRAND: AmazonHelp (Customer Support on Twitter dataset, Kaggle)
+
+
+STAGE 1 — DATA PREPARATION  (dataprep.ipynb)
+---------------------------------------------
+Input:  Data/twcs.csv               (2,811,774 raw tweets, all brands)
+Output: Data/amazonhelp_threads.csv (44,654 conversations / 128,897 tweets)
+
+- No conversation id exists in the raw data. Reconstructed via union-find over
+  the in_response_to_tweet_id reply graph.
+- Kept only conversations touching at least one AmazonHelp tweet.
+- Four sequential filters, cheapest first, each rejection logged to its own
+  CSV (nothing silently dropped):
+    1. length_discard.csv       - more than 5 tweets
+    2. gap_discard.csv          - any gap between turns >= 24 hours
+    3. third_party_discard.csv  - more than one customer (or none) in the thread
+    4. lang_discard.csv         - customer-side text not detected as English
+- Result: every kept conversation has 2-5 turns, finishes within 24h, and has
+  exactly one customer + AmazonHelp.
+
+Accounting (conversations / % of the 82,556 AmazonHelp-touching total):
+  grouped              82,556  100.0%
+  length <= 5          62,962   76.3%
+  max gap < 24h         61,271   74.2%
+  1 customer only       59,995   72.7%
+  lang == en            44,654   54.1%
+
+
+STAGE 2 — INTENT CLASSIFICATION  (intent_pipeline.ipynb)
+---------------------------------------------------------
+Input:  Data/amazonhelp_threads.csv, scoped to the first 5,000 conversations
+        (by conv_id — the chronologically OLDEST 5,000, not a random sample)
+Output: Data/intent.csv               (12 intents: id, name, definition)
+        Data/amazon_conversation.csv  (5,000 rows: conv_id, text,
+                                        predicted_intent, confidence, intent_id)
+
+- Classifies only the customer's FIRST turn per conversation — that's the
+  message an agent must act on before AmazonHelp has replied; later turns
+  would leak information not available at decision time.
+- 12-intent taxonomy, derived by hand-reading a sample of real messages, not
+  assumed up front: order_status, delivery_problem, refund_or_return,
+  cancellation_or_change, billing_or_payment, product_defect, account_access,
+  app_or_site_technical, digital_content, subscription_membership,
+  general_feedback_or_praise, other.
+- Model: gpt-4o-mini (cheap, sufficient for a 12-way classification).
+- Model self-reports a confidence (0-100) alongside its pick. Rule: intent_id
+  is populated only when confidence >= 75; below that it is left NULL rather
+  than guessed, though predicted_intent/confidence are still recorded for
+  audit.
+
+Result: 3,143 / 5,000 mapped (62.9%), 1,857 left null (37.1%).
+Cost: ~$0.09 (gpt-4o-mini, ~100 batched/parallel calls).
+
+
+STAGE 3 — REPLY DRAFTING + ESCALATION  (reply_and_escalation.ipynb)
+----------------------------------------------------------------------
+Input:  Data/amazon_conversation.csv, Data/amazonhelp_threads.csv
+Output: Data/agent_responses.csv (5,000 rows: conv_id, text, predicted_intent,
+        confidence, intent_id, n_grounding_examples, top_similarity,
+        escalate, escalate_reason, draft_reply)
+
+- No resolution/outcome label exists anywhere in the dataset. Proxy used:
+  AmazonHelp's FIRST reply to a similar past message stands in for "how the
+  brand resolved this" — a real limitation, not a detail.
+- Retrieval: text-embedding-3-small embeddings, cosine similarity, restricted
+  to the SAME confidently-classified intent (top 3 matches).
+- Reply drafting: gpt-4o-mini drafts a new reply grounded in the retrieved
+  historical AmazonHelp replies (style + resolution approach, not copied
+  specifics like order numbers).
+- Escalation is a RULE, not another LLM call — cheap, deterministic, and every
+  decision carries a stated reason:
+    1. intent_id null                          -> escalate (Phase 2 unsure)
+    2. predicted_intent == 'other'              -> escalate (no resolution path)
+    3. intent in {account_access, billing_or_payment} -> escalate (high-stakes,
+       regardless of confidence)
+    4. no historical match, or best similarity < 0.35 -> escalate (no grounding)
+    5. otherwise                                -> auto-handle
+- A draft is still produced for escalated rows (except null-intent/'other') so
+  a human reviewer has a starting point, even though it isn't auto-sent.
+
+Result: 2,791 auto-handle (55.8%), 2,209 escalate (44.2%).
+  Escalation reasons: intent unclear 1,857 | billing_or_payment 210 |
+  account_access 130 | 'other' 11 | weak match 1.
+3,132 drafts written successfully.
+Cost: ~$0.20-0.30 (embeddings + drafting calls).
+
+
+STAGE 4 — EVALUATION HARNESS  (eval_harness.ipynb)
+-----------------------------------------------------
+Input:  Data/agent_responses.csv
+Output: Data/golden_set.csv         (150 rows, hand-labeled)
+        Data/judge_calibration.csv  (40 rows, human vs. LLM-judge quality)
+
+- Golden set: 150 conversations, stratified (up to 12 per intent bucket, plus
+  6 more at random) so every intent is represented rather than mirroring the
+  corpus's natural skew.
+- Hand-labeled (by the assistant reading each message — flagged in the
+  notebook as needing the assignment author's own review before submission):
+    gold_intent    - correct intent, independent of what Phase 2 predicted
+    gold_escalate  - whether a human agent would genuinely need to review it,
+                     judged against a stated policy, not just rule-mirroring
+    gold_reply_quality (1-5) - on a 40-row subset, for judge calibration
+- LLM-as-judge: gpt-4o-mini scores each draft 1-5 against a rubric (grounded /
+  appropriate / actionable / safe), compared to the human 1-5 ratings.
+
+RESULTS:
+  Intent accuracy - overall (n=150)        : 89.3%
+  Intent accuracy - confidence >= 75 (n=88): 94.3%
+  Intent accuracy - confidence <  75 (n=62): 82.3%
+
+  Escalation agreement with human judgment : 70.7%
+  Over-escalated (shouldn't have)          : 28.0% (42/150)
+  Under-escalated (should have, didn't)    : 1.3%  (2/150)
+
+  LLM judge vs. human reply-quality (n=40):
+    Exact match      : 50.0%
+    Within 1 point   : 92.5%
+    Spearman rho     : 0.11 (p=0.51, NOT significant)
+
+
+KEY FINDINGS FOR THE REPORT
+------------------------------
+1. The 75% confidence threshold is conservative, not precise. 82.3% accuracy
+   on the "unconfident" (null) bucket means most of those 1,857 discarded
+   classifications were actually correct — the gate is discarding usable
+   answers, not just catching genuinely hard cases.
+2. Escalation errs safe (1.3% under- vs 28% over-escalation) but at a real
+   automation-rate cost, almost entirely driven by the same conservative
+   confidence gate, not by the high-stakes/other rules.
+3. The LLM judge's "92.5% within one point" looks reassuring but the actual
+   correlation with the human rating is 0.11 and not statistically
+   significant — both sets of scores just cluster in the 3-4 range. This is
+   the textbook example for the assignment's mandatory "what's misleading
+   about my headline number" section.
+4. A few intent misclassifications are keyword-driven false positives, not
+   confidence problems (e.g. a thank-you message about an already-resolved
+   account issue got tagged account_access and auto-escalated purely because
+   it mentioned "account").
+5. There is no "customer already followed up / waited too long" escalation
+   signal — a few correct escalations only happened to be correct because of
+   an unrelated intent match, when the real trigger should have been repeat
+   contact / elapsed time.
+
+
+FILES PRODUCED
+------------------
+Notebooks:
+  dataprep.ipynb
+  intent_pipeline.ipynb
+  reply_and_escalation.ipynb
+  eval_harness.ipynb
+
+Data/ (besides twcs.csv):
+  amazonhelp_threads.csv       - 44,654 cleaned conversations
+  length_discard.csv, gap_discard.csv, third_party_discard.csv,
+  lang_discard.csv             - discard audit trail (Stage 1)
+  intent.csv                   - 12-intent taxonomy lookup
+  amazon_conversation.csv      - 5,000 rows, intent-classified (Stage 2)
+  agent_responses.csv          - 5,000 rows, draft + escalation (Stage 3)
+  golden_set.csv               - 150 rows, hand-labeled (Stage 4)
+  judge_calibration.csv        - 40 rows, judge vs. human (Stage 4)
+
+Config:
+  .env        - OPENAI_API_KEY (gitignored, never commit)
+  .gitignore  - excludes .env and the 500MB raw twcs.csv from version control
+
+
+IMPORTANT CAVEATS (do not omit from the submission)
+-------------------------------------------------------
+- conv_id 1-5000 in Stages 2-4 are the chronologically OLDEST 5,000
+  conversations, not a random/representative sample.
+- All hand-labeling (150-row golden set, 40-row quality ratings, and the
+  original 80-row taxonomy-derivation sample) was done by the AI assistant
+  reading messages, NOT by the assignment author. The assignment explicitly
+  wants labels "you built yourself" — budget time to review and correct these
+  before submitting, or they are not truly independent ground truth.
+- Both an Anthropic and an OpenAI API key were pasted directly into this chat
+  session at different points. Rotate/regenerate both keys before making this
+  repository public or sharing it for grading.
+- "How the brand historically resolved" is approximated by AmazonHelp's first
+  reply to a similar past message — there is no true outcome/resolution label
+  in this dataset, so this is a stated proxy, not a verified success signal.

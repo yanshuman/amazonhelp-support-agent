@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.claude/
+
+# Raw dataset and large intermediate artifacts are all regenerable by rerunning the
+# notebooks against twcs.csv (see README) - keep the repo lean, not the audit trail.
+Data/twcs.csv
+Data/amazonhelp_threads.csv
+Data/length_discard.csv
+Data/gap_discard.csv
+Data/third_party_discard.csv
+Data/lang_discard.csv
+Data/golden_set_raw.csv
