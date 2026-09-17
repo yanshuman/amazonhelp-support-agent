@@ -45,7 +45,7 @@ golden_set.csv, judge_calibration.csv
 ## 2. System diagram
 
 ```mermaid
-flowchart TD
+flowchart LR
     A[("twcs.csv<br/>2.8M tweets, all brands")] --> B["dataprep.ipynb<br/>union-find conversation<br/>reconstruction + 4 filters"]
     B -->|"discarded, logged"| B1[("length / gap / third-party /<br/>lang discard.csv")]
     B --> C[("amazonhelp_threads.csv<br/>44,654 conversations")]
@@ -182,3 +182,23 @@ flowchart TD
 **Broaden scope**
 - Generalize past first-turn-only handling to support intent *changes* mid-conversation (a customer whose issue evolves across turns), which the current one-shot design explicitly doesn't handle.
 - Extend the same pipeline to other brands in the dataset to test whether the 12-intent taxonomy and escalation policy generalize, or whether they're AmazonHelp-specific.
+
+## 8. Decision log
+
+Non-obvious calls made while building this, and why — a different reasonable engineer could have gone the other way on any of these.
+
+- **Reconstructed conversations with union-find over reply edges, not by grouping tweets from the same author.** Grouping by author would silently split a thread the moment someone else replied into it, and would never reveal that a third party was there at all — the whole third-party filter (below) depends on having the real graph first.
+- **Ran the four discard filters cheapest-first (length → gap → third-party → language).** Guarantees the four discard files are mutually exclusive, and means the slow `langdetect` pass only ever runs on conversations that already survived every cheaper check.
+- **Capped the conversation-completion gap at 24 hours instead of a looser 7-day window.** Drops roughly 3% of conversations instead of ~0.6%, but guarantees every kept conversation is a same-day exchange rather than one padded out by unrelated stragglers weeks later.
+- **Discarded any conversation with more than one customer entirely, rather than trying to attribute the reply to the "right" one.** Once a third party joins, "the customer's problem" stops being a well-defined single thing to classify or resolve — there's no reliable signal for which complaint the AmazonHelp reply was actually answering.
+- **Classify intent from the customer's first turn only, never the full thread.** A live system has to decide what to do the moment the message arrives, before AmazonHelp has replied — any later turn is information that doesn't exist yet at the actual decision point, so using it would overstate real-world accuracy.
+- **Gated intent mapping on a 75% self-reported confidence threshold instead of always taking the top prediction.** Deliberately traded coverage for precision — an unmapped intent is a visible "don't know," not a wrong guess dressed up as a classification.
+- **Scoped Phase 2/3 to the first 5,000 conversations by `conv_id`, i.e. the chronologically *oldest* 5,000, not a random sample.** A pragmatic subsample per the assignment's own guidance, but flagged explicitly because it is not representative of the corpus — a different scoping choice would change every downstream number.
+- **Approximated "how the brand historically resolved this" with AmazonHelp's own first reply to the most similar past message.** There is no outcome/resolution label anywhere in the raw data, so this is a named, stated proxy rather than a hidden assumption — the system has no way to know if that historical reply actually worked.
+- **Restricted retrieval to the same intent bucket only, even when a cross-intent match might be more textually similar.** Prevents grounding a new reply in a resolution approach for a structurally different problem just because the wording happens to overlap.
+- **Made escalation a fixed, auditable rule instead of another LLM call.** Costs a bit of nuance the model might have caught, but buys a decision every line of which a human can read, dispute, and trust to behave the same way twice — and every decision carries a stated reason instead of a black-box score.
+- **Escalate `account_access` and `billing_or_payment` unconditionally, regardless of classifier confidence.** A deliberate, conservative policy choice — money and account-security topics go to a human even when the model is very sure, because the cost of being wrong there is asymmetric with every other intent.
+- **Still generate a draft reply for escalated conversations (except null-intent and `other`).** A human reviewing a flagged ticket benefits from a starting point even though it won't be auto-sent — escalating a message doesn't mean throwing away the retrieval work already done for it.
+- **Evaluated `gold_escalate` against the policy applied to the *gold* intent, not the pipeline's *predicted* intent.** Checking escalation against the model's own predicted intent would just test whether the code correctly implements itself; checking it against the true intent tests whether the actual decisions are right.
+- **Reported the LLM judge's weak Spearman correlation (0.11) instead of leading with the flattering 92.5%-within-one-point figure.** Both numbers are true; only one of them would have been honest to present alone, since they largely disagree about how much the judge should be trusted.
+- **Excluded large regenerable intermediates from the GitHub repo, keeping only the small final-stage CSVs.** Every dropped file can be rebuilt by rerunning `dataprep.ipynb` against the (separately downloaded) raw dataset, so keeping them in version control would only have bloated the repo without adding anything a grader couldn't reproduce in minutes.
