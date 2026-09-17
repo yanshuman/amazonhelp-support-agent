@@ -4,7 +4,7 @@ An AI support agent built on the [Customer Support on Twitter](https://www.kaggl
 
 Full pipeline write-up (numbers, findings, caveats): [`pipeline_summary.txt`](pipeline_summary.txt).
 
-## Reproduce this (≈15 minutes, ≈$0.40 in API cost)
+## Reproduce this
 
 **1. Setup**
 
@@ -26,12 +26,12 @@ Download `twcs.csv` from the [Kaggle dataset](https://www.kaggle.com/datasets/th
 
 **3. Run the notebooks in order**
 
-| notebook | what it does | approx. time | approx. cost |
-|---|---|---|---|
-| `dataprep.ipynb` | reconstructs conversations from raw tweets, filters to clean AmazonHelp threads | ~2 min | $0 |
-| `intent_pipeline.ipynb` | classifies the first 5,000 conversations into 12 intents via `gpt-4o-mini` | ~3 min | ~$0.10 |
-| `reply_and_escalation.ipynb` | embeds messages, retrieves similar historical cases, drafts replies, decides escalation | ~5 min | ~$0.25 |
-| `eval_harness.ipynb` | samples a 150-row golden set, computes accuracy/escalation metrics, runs an LLM judge against 40 hand-rated drafts | ~2 min | ~$0.02 |
+| notebook | what it does |
+|---|---|
+| `dataprep.ipynb` | reconstructs conversations from raw tweets, filters to clean AmazonHelp threads |
+| `intent_pipeline.ipynb` | classifies the first 5,000 conversations into 12 intents via `gpt-4o-mini` |
+| `reply_and_escalation.ipynb` | embeds messages, retrieves similar historical cases, drafts replies, decides escalation |
+| `eval_harness.ipynb` | samples a 150-row golden set, computes accuracy/escalation metrics, runs an LLM judge against 40 hand-rated drafts |
 
 Each notebook reads the previous stage's output from `Data/` and writes its own; run top-to-bottom in Jupyter or via `jupyter nbconvert --to notebook --execute --inplace <notebook>.ipynb`.
 
